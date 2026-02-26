@@ -24,23 +24,30 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
   }
 
   Future<void> _load() async {
+    // 先并发请求内容和声音列表
+    ContentModel? content;
+    List<VoiceModel> voices = [];
+
     try {
-      final content = await ApiService.instance.getContent(widget.contentId);
-      final voices  = await ApiService.instance.getVoiceModels();
-      final ready   = voices.where((v) => v.status == VoiceStatus.ready).toList();
-      if (mounted) setState(() {
-        _content  = content;
-        _voices   = ready;
-        _selectedVoiceId = ready.isNotEmpty ? ready.first.id : null;
-        _loading  = false;
-      });
+      content = await ApiService.instance.getContent(widget.contentId);
     } catch (_) {
-      // 演示模式
-      if (mounted) setState(() {
-        _content = _mockContent(widget.contentId);
-        _loading = false;
-      });
+      content = _mockContent(widget.contentId);
     }
+
+    try {
+      final all = await ApiService.instance.getVoiceModels();
+      voices = all.where((v) => v.status == VoiceStatus.ready).toList();
+    } catch (_) {
+      // API 不通时用 mock 声音数据，方便演示专属声音流程
+      voices = _mockVoices;
+    }
+
+    if (mounted) setState(() {
+      _content = content;
+      _voices  = voices;
+      _selectedVoiceId = voices.isNotEmpty ? voices.first.id : null;
+      _loading = false;
+    });
   }
 
   @override
@@ -236,3 +243,25 @@ ContentModel _mockContent(String id) {
   };
   return map[id] ?? map['1']!;
 }
+
+// 演示用 mock 声音模型（API 不通时展示）
+final _mockVoices = [
+  VoiceModel(
+    id: 'mock_mom_v1',
+    userId: 'demo',
+    role: 'mom',
+    version: 1,
+    status: VoiceStatus.ready,
+    similarityScore: 0.92,
+    createdAt: DateTime(2025, 1, 1),
+  ),
+  VoiceModel(
+    id: 'mock_dad_v1',
+    userId: 'demo',
+    role: 'dad',
+    version: 1,
+    status: VoiceStatus.ready,
+    similarityScore: 0.88,
+    createdAt: DateTime(2025, 1, 1),
+  ),
+];

@@ -26,10 +26,11 @@ dependencies:
   shared_preferences: ^2.2.2
 
   # 音频录制
-  record: ^5.0.4
+  record: ^6.0.0
 
   # 音频播放
   just_audio: ^0.9.36
+  just_audio_web: ^0.4.9   # Web 平台支持
   audio_session: ^0.1.18
 
   # UI 工具

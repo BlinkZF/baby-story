@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -82,6 +83,7 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen>
   }
 
   Future<void> _requestPermission() async {
+    if (kIsWeb) return; // Web 用浏览器原生权限弹窗，无需手动请求
     await Permission.microphone.request();
   }
 
@@ -94,8 +96,14 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen>
   }
 
   Future<void> _startRecord() async {
-    final dir  = await getTemporaryDirectory();
-    final path = '${dir.path}/voice_${widget.role}_${_current}.m4a';
+    String path;
+    if (kIsWeb) {
+      // Web 平台不支持文件路径，用虚拟路径标识
+      path = 'voice_${widget.role}_${_current}.m4a';
+    } else {
+      final dir = await getTemporaryDirectory();
+      path = '${dir.path}/voice_${widget.role}_${_current}.m4a';
+    }
     await _recorder.start(const RecordConfig(encoder: AudioEncoder.aacLc), path: path);
     setState(() { _recording = true; _currentPath = path; });
   }

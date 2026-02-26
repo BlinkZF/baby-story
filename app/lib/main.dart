@@ -6,6 +6,13 @@ import 'router/app_router.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 捕获 Flutter 框架层异常，白屏时显示红屏错误提示
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+  };
+
   runApp(const ProviderScope(child: BaobaoApp()));
 }
 

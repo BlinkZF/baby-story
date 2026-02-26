@@ -2,7 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
-const _baseUrl = 'http://localhost:8081/api/v1';
+// localhost 用于 Web/macOS 调试，手机调试时改为 Mac 局域网 IP
+const _baseUrl = 'http://172.16.10.13:8081/api/v1';
 
 class ApiService {
   ApiService._();
