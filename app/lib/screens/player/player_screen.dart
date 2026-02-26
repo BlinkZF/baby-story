@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:go_router/go_router.dart';
 import 'package:just_audio/just_audio.dart';
 import '../../models/models.dart';
@@ -17,26 +18,44 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
+  // 专属声音播放器
   final _player = AudioPlayer();
+  // 系统 TTS（默认声音）
+  final _tts = FlutterTts();
 
   ContentModel? _content;
-  _SynthState  _synthState = _SynthState.loading;
-  bool _isPlaying  = false;
-  bool _screenDim  = false;   // 胎教模式
-  double _speed    = 1.0;
-  int?  _sleepMin;            // 定时关闭（分钟）
+  _SynthState _synthState = _SynthState.loading;
+  bool _isPlaying = false;
+  bool _screenDim = false; // 胎教模式
+  double _speed = 1.0;
+  int? _sleepMin;
   Timer? _sleepTimer;
+
+  // TTS 进度（字符位置）
+  int _ttsWordStart = 0;
+  int _ttsWordEnd = 0;
+
+  // 专属声音进度
   Duration _position = Duration.zero;
-  Duration _total    = Duration.zero;
+  Duration _total = Duration.zero;
+
+  bool get _isTtsMode => widget.voiceModelId == null;
 
   @override
   void initState() {
     super.initState();
-    _player.positionStream.listen((p) { if (mounted) setState(() => _position = p); });
-    _player.durationStream.listen((d) { if (d != null && mounted) setState(() => _total = d); });
-    _player.playerStateStream.listen((s) {
-      if (mounted) setState(() => _isPlaying = s.playing);
+
+    // 专属声音播放器监听
+    _player.positionStream.listen((p) {
+      if (mounted) setState(() => _position = p);
     });
+    _player.durationStream.listen((d) {
+      if (d != null && mounted) setState(() => _total = d);
+    });
+    _player.playerStateStream.listen((s) {
+      if (mounted && !_isTtsMode) setState(() => _isPlaying = s.playing);
+    });
+
     _initContent();
   }
 
@@ -44,35 +63,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final content = await ApiService.instance.getContent(widget.contentId);
       if (mounted) setState(() => _content = content);
-      await _synthesize();
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _content   = _mockContent(widget.contentId);
-          _synthState = _SynthState.ready;
-        });
-        // 演示：加载一段示例音频（公共域）
-        try {
-          await _player.setUrl(
-              'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3');
-        } catch (_) {}
-      }
+      if (mounted) setState(() => _content = _mockContent(widget.contentId));
+    }
+
+    if (_isTtsMode) {
+      await _initTts();
+    } else {
+      await _synthesize();
     }
   }
 
+  // ── TTS 初始化
+  Future<void> _initTts() async {
+    await _tts.setLanguage('zh-CN');
+    await _tts.setSpeechRate(0.5); // 0.0~1.0，0.5 接近正常语速
+    await _tts.setVolume(1.0);
+    await _tts.setPitch(1.0);
+
+    _tts.setStartHandler(() {
+      if (mounted) setState(() => _isPlaying = true);
+    });
+    _tts.setCompletionHandler(() {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+    _tts.setPauseHandler(() {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+    _tts.setContinueHandler(() {
+      if (mounted) setState(() => _isPlaying = true);
+    });
+    // 高亮朗读进度（部分平台支持）
+    _tts.setProgressHandler((text, start, end, word) {
+      if (mounted) setState(() {
+        _ttsWordStart = start;
+        _ttsWordEnd = end;
+      });
+    });
+
+    if (mounted) setState(() => _synthState = _SynthState.ready);
+  }
+
+  // ── TTS 播放/暂停
+  Future<void> _ttsTogglePlay() async {
+    final text = _content?.textContent ?? '';
+    if (text.isEmpty) return;
+    if (_isPlaying) {
+      await _tts.pause();
+    } else {
+      // 重新朗读（部分平台不支持 resume，统一用 speak）
+      await _tts.speak(text);
+    }
+  }
+
+  // ── 专属声音合成
   Future<void> _synthesize() async {
     setState(() => _synthState = _SynthState.loading);
     try {
       final res = await ApiService.instance.synthesize(
         widget.contentId,
-        widget.voiceModelId ?? 'system',
+        widget.voiceModelId!,
       );
-      // 轮询合成状态
       await _pollSynthesize(res['taskId']);
     } catch (_) {
-      if (mounted) setState(() => _synthState = _SynthState.ready);
+      // 合成失败降级为 TTS
+      if (mounted) {
+        setState(() => _isTtsFallback = true);
+        await _initTts();
+      }
     }
   }
+
+  bool _isTtsFallback = false;
 
   Future<void> _pollSynthesize(String taskId) async {
     for (var i = 0; i < 30; i++) {
@@ -91,22 +153,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _togglePlay() {
-    if (_isPlaying) _player.pause(); else _player.play();
+    if (_isTtsMode || _isTtsFallback) {
+      _ttsTogglePlay();
+    } else {
+      if (_isPlaying) _player.pause(); else _player.play();
+    }
   }
 
-  void _seek(Duration pos) => _player.seek(pos);
+  void _seek(Duration pos) {
+    if (!_isTtsMode) _player.seek(pos);
+  }
 
   void _changeSpeed(double s) {
     setState(() => _speed = s);
-    _player.setSpeed(s);
+    if (_isTtsMode || _isTtsFallback) {
+      // TTS 速度：0.5 = 1x，映射关系
+      _tts.setSpeechRate(0.5 * s);
+    } else {
+      _player.setSpeed(s);
+    }
   }
 
   void _setSleepTimer(int? min) {
     _sleepTimer?.cancel();
     setState(() => _sleepMin = min);
     if (min != null) {
-      _sleepTimer = Timer(Duration(minutes: min), () {
-        _player.pause();
+      _sleepTimer = Timer(Duration(minutes: min), () async {
+        if (_isTtsMode || _isTtsFallback) {
+          await _tts.stop();
+        } else {
+          _player.pause();
+        }
         if (mounted) setState(() => _sleepMin = null);
       });
     }
@@ -115,13 +192,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _player.dispose();
+    _tts.stop();
     _sleepTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // 胎教模式：全屏变暗
     if (_screenDim) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
@@ -136,18 +213,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  // ── 胎教模式（暗屏大字）
+  // ── 胎教模式（暗屏大字 + 高亮朗读进度）
   Widget _buildDimMode() => GestureDetector(
     onTap: () => setState(() => _screenDim = false),
     child: Center(
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Text(
-            _content?.textContent ?? '',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 22, color: Colors.white70, height: 1.9),
-          ),
+          child: _isTtsMode
+              ? _HighlightText(
+                  text: _content?.textContent ?? '',
+                  start: _ttsWordStart,
+                  end: _ttsWordEnd,
+                  style: const TextStyle(fontSize: 22, color: Colors.white70, height: 1.9),
+                  highlightColor: AppColors.primary,
+                )
+              : Text(
+                  _content?.textContent ?? '',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 22, color: Colors.white70, height: 1.9),
+                ),
         ),
         const SizedBox(height: 60),
         _buildPlayButton(large: true),
@@ -160,7 +245,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // ── 普通模式
   Widget _buildNormalMode() => Column(children: [
-    // 顶部栏
     Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(children: [
@@ -208,16 +292,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Text(_content?.title ?? '加载中...',
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
-          Text(widget.voiceModelId != null ? '专属声音版本' : '系统声音版本',
-              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+          Text(
+            _isTtsFallback
+                ? '系统普通话朗读（专属声音生成失败）'
+                : (widget.voiceModelId != null ? '专属声音版本' : '系统普通话朗读'),
+            style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
           const SizedBox(height: 32),
 
           // 合成状态
           if (_synthState == _SynthState.loading) ...[
             const CircularProgressIndicator(color: AppColors.primary),
             const SizedBox(height: 12),
-            const Text('正在生成专属音频，约 10~30 秒...',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            Text(
+              widget.voiceModelId != null
+                  ? '正在生成专属音频，约 10~30 秒...'
+                  : '正在初始化朗读引擎...',
+              style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
             const SizedBox(height: 32),
           ],
 
@@ -231,8 +323,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             const SizedBox(height: 24),
           ],
 
-          // 进度条
-          if (_synthState == _SynthState.ready) ...[
+          // 进度条（专属声音模式才显示，TTS 不支持 seek）
+          if (_synthState == _SynthState.ready && !_isTtsMode && !_isTtsFallback) ...[
             Slider(
               value: _position.inSeconds.toDouble().clamp(0, _total.inSeconds.toDouble()),
               max: _total.inSeconds.toDouble().clamp(1, double.infinity),
@@ -251,33 +343,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
             const SizedBox(height: 24),
           ],
 
+          if (_synthState == _SynthState.ready && (_isTtsMode || _isTtsFallback))
+            const SizedBox(height: 24),
+
           // 主控制按钮
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            IconButton(
-              icon: const Icon(Icons.replay_10_rounded, size: 36),
-              color: AppColors.textSecondary,
-              onPressed: () => _seek(_position - const Duration(seconds: 10)),
-            ),
-            const SizedBox(width: 16),
+            if (!_isTtsMode && !_isTtsFallback)
+              IconButton(
+                icon: const Icon(Icons.replay_10_rounded, size: 36),
+                color: AppColors.textSecondary,
+                onPressed: () => _seek(_position - const Duration(seconds: 10)),
+              ),
+            if (!_isTtsMode && !_isTtsFallback) const SizedBox(width: 16),
             _buildPlayButton(),
-            const SizedBox(width: 16),
-            IconButton(
-              icon: const Icon(Icons.forward_10_rounded, size: 36),
-              color: AppColors.textSecondary,
-              onPressed: () => _seek(_position + const Duration(seconds: 10)),
-            ),
+            if (!_isTtsMode && !_isTtsFallback) const SizedBox(width: 16),
+            if (!_isTtsMode && !_isTtsFallback)
+              IconButton(
+                icon: const Icon(Icons.forward_10_rounded, size: 36),
+                color: AppColors.textSecondary,
+                onPressed: () => _seek(_position + const Duration(seconds: 10)),
+              ),
           ]),
           const SizedBox(height: 24),
 
           // 速度 & 定时
           Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            // 速度选择
             _ControlChip(
               label: '${_speed}x',
               onTap: () => _showSpeedSheet(),
             ),
             const SizedBox(width: 12),
-            // 定时关闭
             _ControlChip(
               label: _sleepMin == null ? '定时关闭' : '$_sleepMin 分钟后停',
               active: _sleepMin != null,
@@ -286,15 +381,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ]),
           const SizedBox(height: 40),
 
-          // 内容文字（跟读区）
+          // 内容文字（TTS 模式高亮当前朗读词）
           if (_content != null) ...[
             const Divider(),
             const SizedBox(height: 12),
             const Text('内容文字',
                 style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
             const SizedBox(height: 10),
-            Text(_content!.textContent,
-                style: const TextStyle(fontSize: 16, color: AppColors.textPrimary, height: 1.9)),
+            _isTtsMode || _isTtsFallback
+                ? _HighlightText(
+                    text: _content!.textContent,
+                    start: _ttsWordStart,
+                    end: _ttsWordEnd,
+                    style: const TextStyle(fontSize: 16, color: AppColors.textPrimary, height: 1.9),
+                    highlightColor: AppColors.primary,
+                  )
+                : Text(_content!.textContent,
+                    style: const TextStyle(fontSize: 16, color: AppColors.textPrimary, height: 1.9)),
             const SizedBox(height: 32),
           ],
         ]),
@@ -309,12 +412,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Container(
         width: size, height: size,
         decoration: BoxDecoration(
-          color: AppColors.primary,
+          color: _synthState == _SynthState.ready ? AppColors.primary : AppColors.divider,
           shape: BoxShape.circle,
-          boxShadow: [BoxShadow(
-            color: AppColors.primary.withOpacity(0.35),
-            blurRadius: 20, offset: const Offset(0, 6),
-          )],
+          boxShadow: _synthState == _SynthState.ready
+              ? [BoxShadow(color: AppColors.primary.withOpacity(0.35), blurRadius: 20, offset: const Offset(0, 6))]
+              : [],
         ),
         child: Icon(
           _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
@@ -376,6 +478,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
 }
 
 enum _SynthState { loading, ready, failed }
+
+// ── 朗读高亮文字组件
+class _HighlightText extends StatelessWidget {
+  final String text;
+  final int start;
+  final int end;
+  final TextStyle style;
+  final Color highlightColor;
+
+  const _HighlightText({
+    required this.text,
+    required this.start,
+    required this.end,
+    required this.style,
+    required this.highlightColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (start >= end || start < 0 || end > text.length) {
+      return Text(text, style: style, textAlign: TextAlign.left);
+    }
+    return RichText(
+      text: TextSpan(children: [
+        TextSpan(text: text.substring(0, start), style: style),
+        TextSpan(
+          text: text.substring(start, end),
+          style: style.copyWith(
+            color: highlightColor,
+            fontWeight: FontWeight.w700,
+            backgroundColor: highlightColor.withOpacity(0.15),
+          ),
+        ),
+        TextSpan(text: text.substring(end), style: style),
+      ]),
+    );
+  }
+}
 
 class _ControlChip extends StatelessWidget {
   final String label;

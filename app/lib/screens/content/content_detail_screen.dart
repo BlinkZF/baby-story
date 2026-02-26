@@ -101,22 +101,24 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
             // 选择声音
             const Text('选择声音', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             const SizedBox(height: 10),
-            if (_voices.isEmpty)
-              _NoVoiceHint(onTap: () => context.push('/voice/guide?role=mom'))
-            else
-              Column(children: [
-                for (final v in _voices)
-                  _VoiceOption(
-                    voice: v,
-                    selected: _selectedVoiceId == v.id,
-                    onTap: () => setState(() => _selectedVoiceId = v.id),
-                  ),
-                _VoiceOption(
-                  systemVoice: true,
-                  selected: _selectedVoiceId == null,
-                  onTap: () => setState(() => _selectedVoiceId = null),
-                ),
-              ]),
+            // 默认声音始终显示在最上方
+            _VoiceOption(
+              systemVoice: true,
+              selected: _selectedVoiceId == null,
+              onTap: () => setState(() => _selectedVoiceId = null),
+            ),
+            // 专属声音列表
+            for (final v in _voices)
+              _VoiceOption(
+                voice: v,
+                selected: _selectedVoiceId == v.id,
+                onTap: () => setState(() => _selectedVoiceId = v.id),
+              ),
+            // 没有专属声音时，显示录音引导提示
+            if (_voices.isEmpty) ...[
+              const SizedBox(height: 8),
+              _RecordVoiceHint(onTap: () => context.push('/voice/guide?role=mom')),
+            ],
             const SizedBox(height: 80),
           ]),
         )),
@@ -130,7 +132,7 @@ class _ContentDetailScreenState extends State<ContentDetailScreen> {
             height: 52,
             child: ElevatedButton.icon(
               icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('生成并播放'),
+              label: Text(_selectedVoiceId != null ? '生成专属版本并播放' : '使用默认声音播放'),
               onPressed: () => context.push(
                 '/player/${c.id}${_selectedVoiceId != null ? '?voiceModelId=$_selectedVoiceId' : ''}'),
             ),
@@ -199,29 +201,28 @@ class _VoiceOption extends StatelessWidget {
   );
 }
 
-class _NoVoiceHint extends StatelessWidget {
+class _RecordVoiceHint extends StatelessWidget {
   final VoidCallback onTap;
-  const _NoVoiceHint({required this.onTap});
+  const _RecordVoiceHint({required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
     onTap: onTap,
     child: Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppColors.cardBg,
+        color: AppColors.primary.withOpacity(0.05),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.primary.withOpacity(0.2)),
       ),
       child: Row(children: [
-        const Text('🎙', style: TextStyle(fontSize: 28)),
+        const Text('🎙', style: TextStyle(fontSize: 22)),
         const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('还没有专属声音', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-          const Text('录制声音后可用爸爸/妈妈的声音朗读',
-              style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+        const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('录制专属声音', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.primary)),
+          Text('用爸爸/妈妈的声音朗读，更有温度', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
         ])),
-        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textHint),
+        const Icon(Icons.arrow_forward_ios_rounded, size: 13, color: AppColors.primary),
       ]),
     ),
   );
