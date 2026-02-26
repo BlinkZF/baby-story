@@ -1,0 +1,22 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'theme/app_theme.dart';
+import 'router/app_router.dart';
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const ProviderScope(child: BaobaoApp()));
+}
+
+class BaobaoApp extends StatelessWidget {
+  const BaobaoApp({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: '宝宝胎教',
+      theme: AppTheme.light,
+      routerConfig: appRouter,
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}

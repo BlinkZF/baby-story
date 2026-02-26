@@ -1,0 +1,42 @@
+# Flutter
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/.packages
+app/pubspec.lock
+app/macos/Flutter/GeneratedPluginRegistrant.swift
+app/macos/Flutter/Flutter-Debug.xcconfig
+app/macos/Flutter/Flutter-Release.xcconfig
+app/macos/Flutter/ephemeral/
+app/ios/.symlinks/
+app/ios/Pods/
+app/android/.gradle/
+app/android/local.properties
+app/android/app/debug/
+app/android/app/release/
+app/android/app/profile/
+
+# Maven
+backend/**/target/
+backend/**/.mvn/
+!backend/**/.mvn/wrapper/maven-wrapper.jar
+backend/**/mvnw
+backend/**/mvnw.cmd
+
+# IDE
+.idea/
+*.iml
+*.iws
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Apifox cache
+.apifox-cache/
+.codebuddy/
+
+# Logs
+*.log
+logs/
