@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/api_service.dart';
+import '../../services/volcano_tts_service.dart';
 import '../../theme/app_theme.dart';
 
 class VoiceResultScreen extends StatefulWidget {
@@ -15,25 +16,48 @@ class VoiceResultScreen extends StatefulWidget {
 class _VoiceResultScreenState extends State<VoiceResultScreen> {
   _TrainState _state = _TrainState.training;
   int _elapsedSeconds = 0;
-  Timer? _pollTimer;
   Timer? _elapsedTimer;
+  Timer? _pollTimer;
+
+  // volcano_<speakerId>
+  String? get _speakerId {
+    if (widget.taskId.startsWith('volcano_')) {
+      return widget.taskId.substring('volcano_'.length);
+    }
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _startPolling();
+    if (widget.taskId.startsWith('local_')) {
+      // 本地模式：直接完成
+      _state = _TrainState.done;
+    } else if (_speakerId != null) {
+      // 火山引擎模式：轮询训练状态
+      _startElapsedTimer();
+      _startPolling(_speakerId!);
+    } else {
+      _state = _TrainState.done;
+    }
+  }
+
+  void _startElapsedTimer() {
     _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsedSeconds++);
     });
   }
 
-  void _startPolling() {
-    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+  void _startPolling(String speakerId) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 8), (_) async {
       try {
-        final data = await ApiService.instance.getTrainingStatus(widget.taskId);
-        final status = data['status'] as String?;
+        final svc = VolcanoTtsService.instance;
+        await svc.loadConfig();
+        final status = await svc.getVoiceStatus(speakerId);
         if (!mounted) return;
-        if (status == 'ready') {
+        if (status == 'active') {
+          // 更新本地存储中的声音状态
+          await ApiService.instance.updateVoiceStatus(speakerId, 'ready');
           setState(() => _state = _TrainState.done);
           _pollTimer?.cancel();
           _elapsedTimer?.cancel();
@@ -43,12 +67,7 @@ class _VoiceResultScreenState extends State<VoiceResultScreen> {
           _elapsedTimer?.cancel();
         }
       } catch (_) {
-        // 演示模式：15 秒后模拟完成
-        if (_elapsedSeconds >= 15 && mounted) {
-          setState(() => _state = _TrainState.done);
-          _pollTimer?.cancel();
-          _elapsedTimer?.cancel();
-        }
+        // 网络问题跳过本次，继续轮询
       }
     });
   }

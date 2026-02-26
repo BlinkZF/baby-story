@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
+import '../../services/api_service.dart';
+import '../../services/volcano_tts_service.dart';
 import '../../theme/app_theme.dart';
 
 // 引导朗读文本（40 句，覆盖常见音节）
@@ -136,9 +138,58 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen>
       return;
     }
     setState(() => _loading = true);
-    // TODO: 上传音频文件到服务器，然后调用 start-training 接口
-    await Future.delayed(const Duration(seconds: 1));
-    if (mounted) context.go('/voice/result?taskId=demo_task_001');
+
+    final audioPaths = _recorded.whereType<String>().toList();
+    final svc = VolcanoTtsService.instance;
+    await svc.loadConfig();
+
+    if (svc.isConfigured && !kIsWeb) {
+      // ── 火山引擎模式：上传所有音频并触发训练
+      try {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('正在上传音频，请稍候...'), behavior: SnackBarBehavior.floating, duration: Duration(seconds: 30)));
+
+        final audioIds = <String>[];
+        for (final path in audioPaths) {
+          final id = await svc.uploadAudio(path);
+          audioIds.add(id);
+        }
+
+        final speakerId = await svc.createVoice(
+          audioIds: audioIds,
+          speaker: widget.role == 'dad' ? 'male' : 'female',
+        );
+
+        // 保存为 training 状态，result_screen 里轮询
+        await ApiService.instance.saveLocalVoice(
+          role: widget.role,
+          audioPath: audioPaths.first,
+          speakerId: speakerId,
+          status: 'training',
+        );
+
+        if (mounted) context.go('/voice/result?taskId=volcano_$speakerId');
+      } catch (e) {
+        if (mounted) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('上传失败，已切换本地模式：$e'), behavior: SnackBarBehavior.floating));
+          // 降级本地模式
+          await ApiService.instance.saveLocalVoice(
+            role: widget.role,
+            audioPath: audioPaths.first,
+          );
+          context.go('/voice/result?taskId=local_done');
+        }
+      }
+    } else {
+      // ── 本地模式：直接保存，跳过训练
+      await ApiService.instance.saveLocalVoice(
+        role: widget.role,
+        audioPath: audioPaths.first,
+      );
+      if (mounted) context.go('/voice/result?taskId=local_done');
+    }
   }
 
   @override
@@ -314,6 +365,8 @@ class _VoiceRecordScreenState extends State<VoiceRecordScreen>
         ],
       ),
     );
-    if (ok == true && mounted) context.pop();
+    if (ok == true && mounted) {
+      context.canPop() ? context.pop() : context.go('/home');
+    }
   }
 }

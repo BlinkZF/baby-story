@@ -26,7 +26,7 @@ class VoiceGuideScreen extends StatelessWidget {
               alignment: Alignment.centerLeft,
               child: IconButton(
                 icon: const Icon(Icons.arrow_back_ios_new_rounded),
-                onPressed: () => context.pop(),
+                onPressed: () => context.canPop() ? context.pop() : context.go('/home'),
               ),
             ),
             Expanded(

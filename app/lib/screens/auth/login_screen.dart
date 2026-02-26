@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/api_service.dart';
@@ -12,68 +11,44 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _phoneCtrl = TextEditingController();
-  final _codeCtrl  = TextEditingController();
-  bool _loading    = false;
-  bool _codeSent   = false;
-  int  _countdown  = 0;
+  final _nicknameCtrl = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLogin();
+  }
+
+  // 已有本地用户则直接跳首页
+  Future<void> _checkLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('token');
+    final user  = prefs.getString('local_user');
+    if (token != null && user != null && mounted) {
+      context.go('/home');
+    }
+  }
+
+  Future<void> _enter() async {
+    final name = _nicknameCtrl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入昵称'), behavior: SnackBarBehavior.floating));
+      return;
+    }
+    setState(() => _loading = true);
+    await ApiService.instance.updateMe({'id': 'local_user_1', 'phone': '', 'nickname': name});
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('token', 'local_token');
+    if (mounted) context.go('/home');
+  }
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _codeCtrl.dispose();
+    _nicknameCtrl.dispose();
     super.dispose();
   }
-
-  // ── 发送验证码
-  Future<void> _sendCode() async {
-    final phone = _phoneCtrl.text.trim();
-    if (phone.length != 11) { _toast('请输入正确的手机号'); return; }
-    try {
-      setState(() => _loading = true);
-      await ApiService.instance.sendCode(phone);
-      setState(() { _codeSent = true; _countdown = 60; });
-      _tick();
-    } catch (_) {
-      // 演示模式：忽略网络错误直接进入验证码输入
-      setState(() { _codeSent = true; _countdown = 60; });
-      _tick();
-    } finally {
-      setState(() => _loading = false);
-    }
-  }
-
-  void _tick() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted || _countdown <= 0) return;
-      setState(() => _countdown--);
-      _tick();
-    });
-  }
-
-  // ── 登录
-  Future<void> _login() async {
-    final phone = _phoneCtrl.text.trim();
-    final code  = _codeCtrl.text.trim();
-    if (phone.isEmpty || code.isEmpty) { _toast('请填写手机号和验证码'); return; }
-    setState(() => _loading = true);
-    try {
-      final data = await ApiService.instance.login(phone, code);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', data['token']);
-      if (!mounted) return;
-      final isNew = data['user']?['isNewUser'] == true;
-      context.go(isNew ? '/profile-setup' : '/home');
-    } catch (_) {
-      // 演示模式：直接跳首页
-      if (mounted) context.go('/home');
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  void _toast(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
 
   @override
   Widget build(BuildContext context) {
@@ -90,85 +65,61 @@ class _LoginScreenState extends State<LoginScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Column(
               children: [
-                const SizedBox(height: 64),
+                const SizedBox(height: 80),
                 // Logo
                 Container(
-                  width: 88, height: 88,
+                  width: 96, height: 96,
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(26),
+                    borderRadius: BorderRadius.circular(28),
                     boxShadow: [BoxShadow(
                       color: AppColors.primary.withOpacity(0.18),
-                      blurRadius: 24, offset: const Offset(0, 8),
+                      blurRadius: 28, offset: const Offset(0, 8),
                     )],
                   ),
-                  child: const Center(child: Text('👶', style: TextStyle(fontSize: 44))),
+                  child: const Center(child: Text('👶', style: TextStyle(fontSize: 48))),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 const Text('宝宝胎教',
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
                 const SizedBox(height: 6),
                 const Text('用爸爸妈妈的声音陪宝宝成长',
                     style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
 
-                const SizedBox(height: 52),
-                // 手机号
+                const SizedBox(height: 64),
+                // 昵称输入
                 TextField(
-                  controller: _phoneCtrl,
-                  keyboardType: TextInputType.phone,
-                  maxLength: 11,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    hintText: '请输入手机号',
-                    counterText: '',
-                    prefixIcon: Padding(
-                      padding: EdgeInsets.fromLTRB(14, 0, 6, 0),
-                      child: Text('+86', style: TextStyle(fontSize: 15, color: AppColors.textPrimary)),
+                  controller: _nicknameCtrl,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 18),
+                  decoration: InputDecoration(
+                    hintText: '给自己起个昵称吧',
+                    hintStyle: const TextStyle(fontSize: 16, color: AppColors.textHint),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: BorderSide.none,
                     ),
-                    prefixIconConstraints: BoxConstraints(minWidth: 0, minHeight: 0),
                   ),
+                  onSubmitted: (_) => _enter(),
                 ),
-                const SizedBox(height: 12),
-                // 验证码行
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _codeCtrl,
-                      keyboardType: TextInputType.number,
-                      maxLength: 6,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(hintText: '验证码', counterText: ''),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    width: 108, height: 52,
-                    child: OutlinedButton(
-                      onPressed: (_loading || _countdown > 0) ? null : _sendCode,
-                      child: Text(_countdown > 0 ? '${_countdown}s' : '获取验证码',
-                          style: const TextStyle(fontSize: 13)),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 32),
-                // 登录按钮
+                const SizedBox(height: 20),
                 SizedBox(
-                  width: double.infinity,
-                  height: 52,
+                  width: double.infinity, height: 52,
                   child: ElevatedButton(
-                    onPressed: _loading ? null : _login,
+                    onPressed: _loading ? null : _enter,
                     child: _loading
                         ? const SizedBox(width: 22, height: 22,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('登录'),
+                        : const Text('开始使用', style: TextStyle(fontSize: 16)),
                   ),
                 ),
-                const SizedBox(height: 32),
-                Text(
-                  '未注册的手机号将自动创建账号\n登录即代表同意《用户协议》和《隐私政策》',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, color: AppColors.textHint, height: 1.8),
-                ),
+                const SizedBox(height: 40),
+                const Text('所有数据保存在本地，无需注册',
+                    style: TextStyle(fontSize: 12, color: AppColors.textHint)),
               ],
             ),
           ),

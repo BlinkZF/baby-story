@@ -53,6 +53,8 @@ class VoiceModel {
   final double? similarityScore;
   final int? sampleDuration;
   final DateTime createdAt;
+  /// 火山引擎 speaker_id（有值说明已上传训练）
+  final String? speakerId;
 
   const VoiceModel({
     required this.id,
@@ -63,10 +65,13 @@ class VoiceModel {
     this.similarityScore,
     this.sampleDuration,
     required this.createdAt,
+    this.speakerId,
   });
 
   String get roleLabel => role == 'dad' ? '爸爸' : '妈妈';
   String get roleEmoji => role == 'dad' ? '👨' : '👩';
+  /// 是否已接入火山引擎声音克隆
+  bool get hasVolcanoVoice => speakerId != null && status == VoiceStatus.ready;
 
   factory VoiceModel.fromJson(Map<String, dynamic> j) => VoiceModel(
         id: j['id'],
@@ -77,6 +82,7 @@ class VoiceModel {
         similarityScore: (j['similarityScore'] as num?)?.toDouble(),
         sampleDuration: j['sampleDuration'],
         createdAt: DateTime.parse(j['createdAt']),
+        speakerId: j['speakerId'],
       );
 }
 

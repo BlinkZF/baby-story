@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -38,6 +39,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // 专属声音进度
   Duration _position = Duration.zero;
   Duration _total = Duration.zero;
+
+  bool _isTtsFallback = false;
+  String? _synthFailMsg;
 
   bool get _isTtsMode => widget.voiceModelId == null;
 
@@ -124,32 +128,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
         widget.contentId,
         widget.voiceModelId!,
       );
-      await _pollSynthesize(res['taskId']);
-    } catch (_) {
-      // 合成失败降级为 TTS
-      if (mounted) {
-        setState(() => _isTtsFallback = true);
-        await _initTts();
+      // res['audioPath'] 是本地文件路径（火山引擎返回 base64 后保存的）
+      final audioPath = res['audioPath'] as String?;
+      if (audioPath != null && audioPath.isNotEmpty) {
+        // 本地文件用 setFilePath，远程 URL 用 setUrl
+        if (audioPath.startsWith('http')) {
+          await _player.setUrl(audioPath);
+        } else {
+          await _player.setFilePath(audioPath);
+        }
+        if (mounted) setState(() => _synthState = _SynthState.ready);
+        return;
+      }
+      throw Exception('audioPath is empty');
+    } catch (e) {
+      final msg = e.toString();
+      if (msg.contains('local_mode')) {
+        // 未配置 API Key，降级 TTS
+        if (mounted) {
+          setState(() => _isTtsFallback = true);
+          await _initTts();
+        }
+      } else {
+        // 合成失败，降级 TTS 并提示
+        if (mounted) {
+          setState(() { _isTtsFallback = true; _synthFailMsg = msg; });
+          await _initTts();
+        }
       }
     }
-  }
-
-  bool _isTtsFallback = false;
-
-  Future<void> _pollSynthesize(String taskId) async {
-    for (var i = 0; i < 30; i++) {
-      await Future.delayed(const Duration(seconds: 2));
-      if (!mounted) return;
-      try {
-        final data = await ApiService.instance.getSynthesizeStatus(taskId);
-        if (data['status'] == 'done') {
-          await _player.setUrl(data['audioUrl']);
-          if (mounted) setState(() => _synthState = _SynthState.ready);
-          return;
-        }
-      } catch (_) {}
-    }
-    if (mounted) setState(() => _synthState = _SynthState.failed);
   }
 
   void _togglePlay() {
@@ -250,7 +257,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Row(children: [
         IconButton(
           icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
-          onPressed: () => context.pop(),
+          onPressed: () => context.canPop() ? context.pop() : context.go('/home'),
         ),
         const Spacer(),
         const Text('正在播放', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
@@ -294,7 +301,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           const SizedBox(height: 4),
           Text(
             _isTtsFallback
-                ? '系统普通话朗读（专属声音生成失败）'
+                ? (_synthFailMsg != null
+                    ? '专属声音合成失败，已降级为系统朗读'
+                    : '系统普通话朗读（未配置 API Key）')
                 : (widget.voiceModelId != null ? '专属声音版本' : '系统普通话朗读'),
             style: const TextStyle(fontSize: 13, color: AppColors.textSecondary),
           ),
